@@ -201,13 +201,18 @@ let playQueue = [];
 // いま選ばれている音声と話速を取得
 function currentVoiceAndRate(){
   const vs = speechSynthesis.getVoices();
-  const pickChinese = vs.filter(v=>/zh/i.test(v.lang));
-  const voice = (voiceSel.value ? vs.find(v=>v.name===voiceSel.value) : (pickChinese[0] || vs[0])) || null;
+  const th = pickThaiVoices(); // ★タイ語優先
+  // セレクトで指定があればそれ、なければタイ語の先頭、なければ全体の先頭
+  const voice =
+    (voiceSel.value ? vs.find(v => v.name === voiceSel.value) : null)
+    || th[0]
+    || vs[0]
+    || null;
   const map = {"0.8":0.8,"1.0":1.0,"1.2":1.2};
   const rate = map[rateSel.value] || 1.0;
   return {voice, rate};
 }
-
+  
 // 単発の Utterance を作る（queue 再生で使う）
 function makeUtterance(text, voice, rate){
   const u = new SpeechSynthesisUtterance(text);
