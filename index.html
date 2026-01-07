@@ -108,7 +108,7 @@ function renderCats(){
     const b=document.createElement('button');
     b.className='chip'+(cat===activeCat?' active':'');
     b.textContent=cat;
-    b.onclick=()=>{activeCat=cat;render();};
+    b.onclick=()=>{activeCat=cat;renderCats();render();};
     catsDiv.appendChild(b);
   });
 }
