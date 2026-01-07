@@ -2,7 +2,7 @@
 <html lang="ja">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>中国語ミニ会話帳</title>
+<title>タイ語ミニ会話帳</title>
 <style>
   :root { --radius: 12px; }
   body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Noto Sans JP",sans-serif;margin:16px;line-height:1.45}
@@ -31,11 +31,11 @@
   /* チラ見せ中のカードは訳を表示 */
   .card.show .jaen{display:block}
 </style>
-<h1>中国語ミニ会話帳（タップで再生）</h1>
+<h1>タイ語ミニ会話帳（タップで再生）</h1>
 <div class="hint">iPhoneなら<strong>共有</strong>→<strong>ホーム画面に追加</strong>でアプリ風に使えます。</div>
 
 <div class="toolbar">
-  <input id="q" type="search" placeholder="検索（中国語/ピンイン/日本語/英語）">
+  <input id="q" type="search" placeholder="検索（タイ語/発音/日本語/英語）">
   <select id="voiceSel" title="音声"><option value="">音声を自動選択</option></select>
   <select id="rateSel" title="話速">
     <option value="0.8">ややゆっくり</option>
@@ -51,7 +51,7 @@
 
 <div class="cats" id="cats"></div>
 <div id="list"></div>
-<div class="footer">Powered by Web Speech API / zh-CN voice.（端末の音声に依存します）</div>
+<div class="footer">Powered by Web Speech API / th-TH voice.（端末の音声に依存します）</div>
 
 <script>
 /* ---- ここからJS ---- */
@@ -179,7 +179,7 @@ function currentVoiceAndRate(){
 // 単発の Utterance を作る（queue 再生で使う）
 function makeUtterance(text, voice, rate){
   const u = new SpeechSynthesisUtterance(text);
-  u.lang = 'zh-CN';
+  u.lang = 'th-TH';
   if (voice) u.voice = voice;
   u.rate = rate;
   return u;
