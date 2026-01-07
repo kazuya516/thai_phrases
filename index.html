@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="ja">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>中国語ミニ会話帳</title>
+<style>
+  :root { --radius: 12px; }
+  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Noto Sans JP",sans-serif;margin:16px;line-height:1.45}
+  h1{font-size:20px;margin:0 0 10px}
+  .hint{font-size:12px;opacity:.75;margin-bottom:12px}
+  .toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0 12px}
+  input[type="search"]{flex:1;padding:10px;font-size:15px;border:1px solid #ddd;border-radius:12px}
+  select,button,label{font-size:14px}
+  .cats{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+  .chip{padding:8px 12px;border:1px solid #ddd;border-radius:999px;background:#fff;cursor:pointer}
+  .chip.active{background:#efefef}
+  .card{border:1px solid #e5e5e5;border-radius:12px;padding:12px;margin:8px 0}
+  .row{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+  .zh{font-size:18px;font-weight:700;cursor:pointer}
+  .py{font-size:13px;opacity:.7}
+  .jaen{font-size:13px;opacity:.85;margin-top:4px}
+  .controls{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+  .btn{padding:8px 10px;border:1px solid #ccc;background:#fff;border-radius:8px;cursor:pointer}
+  .footer{margin-top:20px;font-size:12px;opacity:.7}
+
+  /* 学習モード（訳を隠す） */
+  .study .jaen{display:none}
+  /* 学習モードの時だけ「訳を見る」ボタンを出す */
+  .peek{display:none}
+  .study .peek{display:inline-block}
+  /* チラ見せ中のカードは訳を表示 */
+  .card.show .jaen{display:block}
+</style>
+<h1>中国語ミニ会話帳（タップで再生）</h1>
+<div class="hint">iPhoneなら<strong>共有</strong>→<strong>ホーム画面に追加</strong>でアプリ風に使えます。</div>
+
+<div class="toolbar">
+  <input id="q" type="search" placeholder="検索（中国語/ピンイン/日本語/英語）">
+  <select id="voiceSel" title="音声"><option value="">音声を自動選択</option></select>
+  <select id="rateSel" title="話速">
+    <option value="0.8">ややゆっくり</option>
+    <option value="1.0" selected>普通</option>
+    <option value="1.2">少し速く</option>
+  </select>
+  <label><input type="checkbox" id="toggleTrans" checked> 訳を表示</label>
+  <button id="playAllBtn" class="btn">全体を再生</button>
+　<button id="playCatBtn" class="btn">このカテゴリを再生</button>
+　<button id="playSearchBtn" class="btn">検索結果を再生</button>
+　<button id="stopBtn" class="btn">停止</button>
+</div>
+
+<div class="cats" id="cats"></div>
+<div id="list"></div>
+<div class="footer">Powered by Web Speech API / zh-CN voice.（端末の音声に依存します）</div>
+
+<script>
+/* ---- ここからJS ---- */
+
+/* 1) ベースフレーズ（省略可：あなたの現行の BASE_PHRASES を使ってOK） */
+const BASE_PHRASES = [/* 略：既存の配列そのまま */];
+
+/* 2) 追加CSVの読込（phrases_extra.csv をルートに置く） */
+async function loadExtraCSV(path='phrases_extra.csv'){
+  try{
+    const res = await fetch(path, {cache:'no-store'});
+    if(!res.ok) return [];
+    const text = await res.text();
+    const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/).filter(l=>l.trim()!=='');
+    const splitCSV = (line)=> line.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/).map(s=>{
+      s=s.trim(); if(s.startsWith('"')&&s.endsWith('"')) s=s.slice(1,-1).replace(/""/g,'"'); return s;
+    });
+    const header = splitCSV(lines[0]);
+    const H = (n)=> header.findIndex(h=>h.replace(/\s/g,'')===n.replace(/\s/g,''));
+    let iC=H('カテゴリ'), iZh=H('中国語'), iPy=H('ピンイン'), iJa=H('日本語'), iEn=H('英語');
+    if(iZh<0||iPy<0||iJa<0||iEn<0){ iZh=header.length-4;iPy=header.length-3;iJa=header.length-2;iEn=header.length-1;if(iC<0)iC=-1; }
+    return lines.slice(1).map(splitCSV).map(cols=>{
+      const c=iC>=0?(cols[iC]||'追加'):'追加';
+      const zh=cols[iZh]||'', py=cols[iPy]||'', ja=cols[iJa]||'', en=cols[iEn]||'';
+      return zh ? {c,zh,py,ja,en} : null;
+    }).filter(Boolean);
+  }catch(e){ console.warn('CSV load error', e); return []; }
+}
+function mergeAndDedupe(base, extra){
+  const out=[], seen=new Set();
+  [...base, ...extra].forEach(p=>{
+    const key=(p.zh||'')+'|'+(p.py||'');
+    if(seen.has(key)) return; seen.add(key); out.push(p);
+  });
+  return out;
+}
+
+/* 3) UI */
+const list = document.getElementById('list');
+const catsDiv = document.getElementById('cats');
+const q = document.getElementById('q');
+const voiceSel = document.getElementById('voiceSel');
+const rateSel = document.getElementById('rateSel');
+const toggleTrans = document.getElementById('toggleTrans');
+
+let PHRASES = [];
+let CATS = ["すべて"];
+let activeCat = "すべて";
+
+function renderCats(){
+  CATS = ["すべて", ...Array.from(new Set(PHRASES.map(p=>p.c)))];
+  catsDiv.innerHTML = "";
+  CATS.forEach(cat=>{
+    const b=document.createElement('button');
+    b.className='chip'+(cat===activeCat?' active':'');
+    b.textContent=cat;
+    b.onclick=()=>{activeCat=cat;render();};
+    catsDiv.appendChild(b);
+  });
+}
+function render(){
+  const keyword = q.value.trim().toLowerCase();
+  list.innerHTML = "";
+  PHRASES.filter(p=>activeCat==="すべて"||p.c===activeCat)
+    .filter(p=>!keyword||[p.zh,p.py,p.ja,p.en].join(" ").toLowerCase().includes(keyword))
+    .forEach((p,idx)=>{
+      const div=document.createElement('div');
+      div.className='card'; div.id=`card-${idx}`;
+      div.innerHTML=`
+        <div class="row">
+          <div class="zh" onclick="peek(${idx})">${p.zh}</div>
+          <div class="py">${p.py}</div>
+        </div>
+        <div class="jaen">${p.ja} / ${p.en}</div>
+        <div class="controls">
+          <button class="btn" onclick="speak('${p.zh.replace(/'/g,"\\'")}')">再生</button>
+          <button class="btn" onclick="speak('${p.zh.replace(/'/g,"\\'")}', true)">ゆっくり</button>
+          <button class="btn peek" onclick="peek(${idx})">訳を見る</button>
+        </div>`;
+      list.appendChild(div);
+    });
+}
+
+/* 音声 */
+function pickChineseVoices(){ const vs=speechSynthesis.getVoices(); const zh=vs.filter(v=>/zh/i.test(v.lang)); return zh.length?zh:vs; }
+function populateVoiceSelector(){ const vs=pickChineseVoices(); voiceSel.innerHTML='<option value="">音声を自動選択</option>'; vs.forEach(v=>{const o=document.createElement('option'); o.value=v.name; o.textContent=`${v.name} (${v.lang})`; voiceSel.appendChild(o);}); }
+function findSelectedVoice(){ const name=voiceSel.value; if(!name) return null; const vs=speechSynthesis.getVoices(); return vs.find(v=>v.name===name)||null; }
+function speak(text, slow=false){ speechSynthesis.cancel(); const u=new SpeechSynthesisUtterance(text); u.lang='zh-CN'; const v=findSelectedVoice()||pickChineseVoices()[0]; if(v) u.voice=v; const map={"0.8":0.8,"1.0":1.0,"1.2":1.2}; u.rate= slow?0.8:(map[rateSel.value]||1.0); speechSynthesis.speak(u); }
+
+/* 訳を一時表示（3秒） */
+const peekTimers={};
+function peek(idx){ const el=document.getElementById(`card-${idx}`); if(!el) return; el.classList.add('show'); clearTimeout(peekTimers[idx]); peekTimers[idx]=setTimeout(()=>el.classList.remove('show'),3000); }
+
+/* 検索 */
+q.addEventListener('input', render);
+
+/* 訳の表示/非表示（保存&学習モード切替） */
+const savedPref = localStorage.getItem('showTrans');
+if(savedPref !== null){ const on = savedPref === 'true'; toggleTrans.checked=on; document.body.classList.toggle('study', !on); }
+toggleTrans.addEventListener('change', () => { const on=toggleTrans.checked; document.body.classList.toggle('study', !on); localStorage.setItem('showTrans', String(on)); });
+
+/* 初期化 */
+(async function init(){
+  const extra = await loadExtraCSV('phrases_extra.csv');  // 追加CSV名
+  PHRASES = mergeAndDedupe(BASE_PHRASES, extra);
+  renderCats(); render();
+  if(typeof speechSynthesis!=='undefined'){ populateVoiceSelector(); speechSynthesis.onvoiceschanged=populateVoiceSelector; }
+})();
+/* ---- ここまでJS ---- */
+/* ====== 一括再生（全体／カテゴリ／検索結果） ====== */
+let isPlaying = false;
+let playIndex = 0;
+let playQueue = [];
+
+// いま選ばれている音声と話速を取得
+function currentVoiceAndRate(){
+  const vs = speechSynthesis.getVoices();
+  const pickChinese = vs.filter(v=>/zh/i.test(v.lang));
+  const voice = (voiceSel.value ? vs.find(v=>v.name===voiceSel.value) : (pickChinese[0] || vs[0])) || null;
+  const map = {"0.8":0.8,"1.0":1.0,"1.2":1.2};
+  const rate = map[rateSel.value] || 1.0;
+  return {voice, rate};
+}
+
+// 単発の Utterance を作る（queue 再生で使う）
+function makeUtterance(text, voice, rate){
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = 'zh-CN';
+  if (voice) u.voice = voice;
+  u.rate = rate;
+  return u;
+}
+
+// 現在のフィルタ（カテゴリ＋検索）を適用したリストを返す
+function getFilteredList(){
+  const keyword = q.value.trim().toLowerCase();
+  return PHRASES
+    .filter(p => activeCat === "すべて" || p.c === activeCat)
+    .filter(p => !keyword || [p.zh, p.py, p.ja, p.en].join(" ").toLowerCase().includes(keyword));
+}
+function getCategoryOnlyList(){
+  return PHRASES.filter(p => activeCat === "すべて" || p.c === activeCat);
+}
+
+// 再生ループ
+function playList(items){
+  if(!items || !items.length) return; // 空は無視
+  speechSynthesis.cancel(); // 念のため停止
+  isPlaying = true;
+  playQueue = items.map(p => p.zh); // 中国語本文で再生
+  playIndex = 0;
+  const {voice, rate} = currentVoiceAndRate();
+  const speakNext = ()=>{
+    if(!isPlaying || playIndex >= playQueue.length){
+      stopPlaying();
+      return;
+    }
+    const u = makeUtterance(playQueue[playIndex], voice, rate);
+    u.onend = ()=>{ playIndex++; setTimeout(speakNext, 120); }; // 次へ（少し間をあける）
+    u.onerror = ()=>{ playIndex++; setTimeout(speakNext, 120); };
+    speechSynthesis.speak(u);
+  };
+  speakNext();
+  updatePlayButtons();
+}
+
+function stopPlaying(){
+  speechSynthesis.cancel();
+  isPlaying = false;
+  playQueue = [];
+  playIndex = 0;
+  updatePlayButtons();
+}
+
+// ボタンの有効/無効
+function updatePlayButtons(){
+  const disable = isPlaying;
+  const byId = id => document.getElementById(id);
+  ['playAllBtn','playCatBtn','playSearchBtn'].forEach(id=>{
+    const el = byId(id);
+    if(el){ el.disabled = disable; }
+  });
+  const stopEl = byId('stopBtn');
+  if(stopEl){ stopEl.disabled = !isPlaying; }
+}
+
+// クリックイベント
+const playAllBtn = document.getElementById('playAllBtn');
+const playCatBtn = document.getElementById('playCatBtn');
+const playSearchBtn = document.getElementById('playSearchBtn');
+const stopBtn = document.getElementById('stopBtn');
+
+if(playAllBtn) playAllBtn.onclick = ()=> playList(PHRASES);
+if(playCatBtn) playCatBtn.onclick = ()=> playList(getCategoryOnlyList());
+if(playSearchBtn) playSearchBtn.onclick = ()=> playList(getFilteredList());
+if(stopBtn) stopBtn.onclick = stopPlaying;
+
+// 検索やカテゴリ切替時に、再生中なら止める（ズレ防止）
+q.addEventListener('input', ()=>{ if(isPlaying) stopPlaying(); });
+</script>
+</html>
