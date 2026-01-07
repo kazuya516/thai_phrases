@@ -235,23 +235,40 @@ function getCategoryOnlyList(){
 
 // 再生ループ
 function playList(items){
-  if(!items || !items.length) return; // 空は無視
-  speechSynthesis.cancel(); // 念のため停止
+  if(!items || !items.length) return;
+
+  // voices がまだ取れてない環境対策
+  if (speechSynthesis.getVoices().length === 0) {
+    speechSynthesis.onvoiceschanged = () => {
+      speechSynthesis.onvoiceschanged = null;
+      playList(items);
+    };
+    speechSynthesis.getVoices(); // Safari対策で叩く
+    return;
+  }
+
+  // 停止 → 少し待ってから開始（Safari安定化）
+  speechSynthesis.cancel();
   isPlaying = true;
-  playQueue = items.map(p => p.zh); // 中国語本文で再生
+
+  playQueue = items.map(p => p.zh); // ターゲット言語本文（zh列にタイ語が入る想定）
   playIndex = 0;
+
   const {voice, rate} = currentVoiceAndRate();
+
   const speakNext = ()=>{
     if(!isPlaying || playIndex >= playQueue.length){
       stopPlaying();
       return;
     }
     const u = makeUtterance(playQueue[playIndex], voice, rate);
-    u.onend = ()=>{ playIndex++; setTimeout(speakNext, 120); }; // 次へ（少し間をあける）
+    u.onend = ()=>{ playIndex++; setTimeout(speakNext, 120); };
     u.onerror = ()=>{ playIndex++; setTimeout(speakNext, 120); };
     speechSynthesis.speak(u);
   };
-  speakNext();
+
+  // cancel直後の即開始を避ける
+  setTimeout(speakNext, 50);
   updatePlayButtons();
 }
 
